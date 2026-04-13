@@ -1,40 +1,58 @@
 <template>
   <div class="game-board">
-    <!-- Botão voltar -->
-    <button class="voltar" @click="$emit('go-back')">Voltar</button>
+    <div v-if="!venceu">
+      <button class="voltar" @click="$emit('go-back')">Voltar</button>
+      
+      <div class="info">
+        <p>Jogadas: {{ moves }}</p>
+      </div>
 
-    <!-- Informações do jogo -->
-    <div class="info">
-      <p>Jogadas: {{ moves }}</p>
+      <div class="grid" :class="dificuldade">
+        <Card
+          v-for="c in cartas"
+          :key="c.id"
+          :carta="c"
+          @click="virarCarta(c)"
+        />
+      </div>
     </div>
 
-    <!-- Grid de cartas -->
-    <div class="grid" :class="dificuldade">
-      <Card
-        v-for="c in cartas"
-        :key="c.id"
-        :carta="c"
-        @click="virarCarta(c)"
-      />
-    </div>
-
-    <!-- Tela de vitória -->
-    <div v-if="venceu" class="victory">
+    <div v-else class="victory">
       <h2>🎉 Parabéns! Você venceu!</h2>
       <p>Jogadas: {{ moves }}</p>
       <p>Pontuação: {{ pontuacao }}</p>
-     <button class="voltar" @click="startGame">Jogar novamente</button>
+
+      <hr>
+
+      <div class="ranking-form">
+        <p>Deseja publicar sua pontuação no ranking?</p>
+        
+        <button class="voltar" @click="enviarParaFirebase" :disabled="carregandoRanking">
+          {{ carregandoRanking ? 'Salvando...' : 'Salvar no Ranking' }}
+        </button>
+        
+        <button class="voltar" @click="$emit('ver-ranking')">
+          Ver Ranking Global
+        </button>
+      </div>
+
+      <hr>
+      <button class="voltar" @click="startGame">Jogar novamente</button>
+      <button class="voltar" @click="$emit('go-back')">Sair</button>
     </div>
   </div>
 </template>
 
 <script>
+import Swal from 'sweetalert2';
 import Card from "./Card.vue";
 import women from '../data/women.json'
+import { db, auth } from '../../firebase.js'; // Adicione o 'auth' aqui
+import { collection, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 export default {
   components: { Card },
-  props: ["imagens", "dificuldade"],
+  props: ["imagens", "dificuldade", "nomeUsuario", "escolaUsuario"],
 
  data() {
   return {
@@ -43,7 +61,9 @@ export default {
     moves: 0,
     venceu: false,
     pontuacao: 0,
-    travado: false // <-- impede cliques rápidos
+    travado: false,// <-- impede cliques rápidos
+    carregandoRanking: false, // <-- ADICIONE ESTA
+    pontuacaoEnviada: false    // <-- ADICIONE ESTA
   };
 },
 
@@ -151,22 +171,96 @@ export default {
   }
 },
 
-    vitoria() {
-      this.venceu = true;
+ vitoria() {
+  this.venceu = true;
+  // Cálculo da pontuação
+  this.pontuacao = Math.max(1000 - this.moves * 20, 0);
 
-      // Fórmula simples de pontuação
-      // Quanto menos jogadas, mais pontos
-      this.pontuacao = Math.max(1000 - this.moves * 20, 0);
+  const key = `highscore-${this.dificuldade}`;
+  const currentHigh = parseInt(localStorage.getItem(key) || '0');
+  if (this.pontuacao > currentHigh) {
+    localStorage.setItem(key, this.pontuacao.toString());
+  }
+},
 
-      // Salvar recorde se for maior
-      const key = `highscore-${this.dificuldade}`;
-      const currentHigh = parseInt(localStorage.getItem(key) || '0');
-      if (this.pontuacao > currentHigh) {
-        localStorage.setItem(key, this.pontuacao.toString());
+async enviarParaFirebase() {
+  this.carregandoRanking = true;
+  try {
+    const user = auth.currentUser;
+    if (!user) throw new Error("Usuário não autenticado");
+
+    // Criamos um ID único para este jogador neste nível específico
+    // Exemplo de ID no Firebase: "ID_DO_USUARIO_facil"
+    const rankingRef = doc(db, "ranking", `${user.uid}_${this.dificuldade}`);
+
+    // Buscamos se já existe um registro para esse ID
+    const docSnap = await getDoc(rankingRef);
+    let podeEnviar = true;
+
+    if (docSnap.exists()) {
+      const recordeAtual = docSnap.data().pontos;
+      // Só permite enviar se a pontuação atual for maior que a salva
+      if (this.pontuacao <= recordeAtual) {
+        podeEnviar = false;
+        Swal.fire({
+          title: 'Bom trabalho!',
+          text: `Sua pontuação atual (${this.pontuacao}) não superou seu recorde anterior (${recordeAtual}).`,
+          icon: 'info',
+          confirmButtonColor: '#ff69b4',
+          background: 'rgba(255, 255, 255, 0.95)',
+          color: '#ff69b4'
+        });
       }
     }
+
+    if (podeEnviar) {
+      // Usamos setDoc para salvar (ele cria se não existir ou sobrescreve se existir)
+      await setDoc(rankingRef, {
+        userId: user.uid,
+        nome: this.nomeUsuario,
+        escola: this.escolaUsuario,
+        jogadas: this.moves,
+        pontos: this.pontuacao,
+        dificuldade: this.dificuldade,
+        data: serverTimestamp()
+      });
+
+      Swal.fire({
+        title: '🎉 NOVO RECORDE!',
+        text: 'Sua maior pontuação foi atualizada no ranking!',
+        icon: 'success',
+        background: 'rgba(255, 255, 255, 0.95)',
+        color: '#ff69b4',
+        confirmButtonColor: '#ff1493',
+        confirmButtonText: 'Incrível!',
+        customClass: {
+          title: 'minha-fonte-evogria',
+          popup: 'minha-fonte-evogria'
+        }
+      });
+      
+      this.pontuacaoEnviada = true;
+    }
+    
+  } catch (error) {
+    console.error(error);
+    Swal.fire({
+      title: 'Erro!',
+      text: 'Não conseguimos acessar o ranking: ' + error.message,
+      icon: 'error',
+      confirmButtonColor: '#d33'
+    });
+  } finally {
+    this.carregandoRanking = false;
   }
-};
+},
+
+irParaRanking() {
+  // Se você estiver usando o sistema de v-if no App.vue:
+  this.$emit('ir-para-ranking'); 
+   }
+  } // <-- Fecha o methods
+}; // <-- Fecha o export default
 </script>
 
 <style>

@@ -56,17 +56,26 @@ export default {
 /* Container principal do menu */
 .start-screen {
   width: 100vw;
-  height: 100vh;
+  /* Mude de height para min-height */
+  min-height: 100vh; 
+  
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
   align-items: center;
   text-align: center;
+  
+  /* Adicione background-attachment: fixed para o fundo não subir */
   background-image: linear-gradient(rgba(0,0,0,0.1), rgba(0,0,0,0.1)), url('/img/menu-fundo.jpg');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
+  background-attachment: fixed; 
+
   padding-top: 50px;
+  /* Adicione um padding-bottom para o conteúdo não colar no final ao rolar */
+  padding-bottom: 50px; 
+  
   box-sizing: border-box;
   font-family: 'Evogria', sans-serif;
 }
